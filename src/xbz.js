@@ -41,6 +41,7 @@ const XBZ_FILEDS = {
 
 	0x56:	['hashAreaSize', 'uint16le'],
 
+	0x60:	['t9', 'uint8'],
 	0x61:	['baseline1', 'str'],
 	0x62:	['baseline2', 'str'],
 	0x63:	['baseline3', 'str'],
@@ -75,6 +76,7 @@ export function parseXbz(buffer) {
 	debug("XBZ signed: " + xbzFormat.signed);
 
 	let info = {
+		signed: xbzFormat.signed,
 		writes: []
 	};
 
