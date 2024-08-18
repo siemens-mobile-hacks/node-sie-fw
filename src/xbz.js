@@ -66,7 +66,7 @@ const XBZ_TYPES = {
 };
 
 export function isXbz(buffer) {
-	return detectXbzFormat(buffer)?.type;
+	return detectXbzFormat(buffer) != null;
 }
 
 export function parseXbz(buffer) {
