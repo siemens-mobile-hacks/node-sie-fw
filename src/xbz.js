@@ -71,6 +71,8 @@ export function isXbz(buffer) {
 
 export function parseXbz(buffer) {
 	let xbzFormat = detectXbzFormat(buffer);
+	if (!xbzFormat)
+		return null;
 
 	debug("XBZ version: " + xbzFormat.version);
 	debug("XBZ signed: " + xbzFormat.signed);
@@ -177,18 +179,20 @@ function decodeXbzWriteFrame(version, buffer, offset) {
 		let addr = (buffer.readUInt8(0) << 16) | (buffer.readUInt8(1) << 8) | (buffer.readUInt8(2));
 		let size = buffer.readUInt8(3);
 		let chk = buffer.readUInt8(4 + size);
+		let actualChk = calcChecksum(buffer, 4 + size);
 
-		if (chk != calcChecksum(buffer, 4 + size))
-			throw new Error(`Invalid chk: ${chk}`);
+		if (chk != actualChk)
+			throw new Error(`Invalid chk: ${sprintf("%08X %04X CHK:%02X != %02X", addr, size, chk, actualChk)} at ${buffer.byteOffset}`);
 
 		return [ 4 + 1 + size, { addr, size, offset: offset + 4 } ];
 	} else if (version == 32) {
 		let addr = buffer.readUInt32BE(0);
 		let size = buffer.readUInt16BE(4);
 		let chk = buffer.readUInt8(6 + size);
+		let actualChk = calcChecksum(buffer, 6 + size);
 
-		if (chk != calcChecksum(buffer, 6 + size))
-			throw new Error(`Invalid chk: ${chk}`);
+		if (chk != actualChk)
+			throw new Error(`Invalid chk: ${sprintf("%08X %04X CHK:%02X != %02X", addr, size, chk, actualChk)} at ${buffer.byteOffset}`);
 
 		return [ 6 + 1 + size, { addr, size, offset: offset + 6 } ];
 	}
@@ -236,6 +240,8 @@ function decodeXbzFrame(frameType, version, buffer) {
 
 function calcChecksum(buffer, size) {
 	let chk = 0;
+	if (size > buffer.length)
+		throw new Error(`Truncated file! [${size} > ${buffer.length}]`);
 	for (let i = 0; i < size; i++)
 		chk ^= buffer[i];
 	return chk;

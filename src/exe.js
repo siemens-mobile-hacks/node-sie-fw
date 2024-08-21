@@ -83,8 +83,9 @@ function extractFromServiceExe(buffer, version) {
 	size = readBits(buffer.slice(offset));
 	out[3] = { size, offset: offset - size };
 
-	let cipherLength = buffer.length - (out[0].size + out[1].size + out[2].size + out[3].size + verions[version][0]);
-	debug(`cipherLength=${cipherLength}`);
+	let cipherKeyLength = buffer.length - (out[0].size + out[1].size + out[2].size + out[3].size + verions[version][1]);
+	let cipherKey = buffer.subarray(0, cipherKeyLength);
+	debug(`cipherKeyLength=${cipherKeyLength}`);
 
 	// Decrypt blocks
 	let payloads = [];
@@ -96,8 +97,8 @@ function extractFromServiceExe(buffer, version) {
 
 		if (out[i].size) {
 			debug(sprintf("BLOCK %08X %08X", out[i].offset, out[i].size));
-			let payload = buffer.subarray(out[i].offset, out[i].offset + out[i].size);
-			applyXor(payload, buffer.slice(0, cipherLength));
+			let payload = Buffer.from(buffer.subarray(out[i].offset, out[i].offset + out[i].size));
+			applyXor(payload, cipherKey);
 			payloads[i] = payload;
 		}
 	}
