@@ -29,9 +29,9 @@ export function extractFromExe(buffer) {
 
 		case "service":
 			debug('Detected type: xbi service (SAG_JK_WH)');
-			let xbiFormatVersion = detectServiceExeVersion(buffer);
-			debug(`xbiFormatVersion=${xbiFormatVersion}`);
-			return extractFromServiceExe(buffer, xbiFormatVersion);
+			let exeFormatVersion = detectServiceExeVersion(buffer);
+			debug(`exeFormatVersion=${exeFormatVersion}`);
+			return extractFromServiceExe(buffer, exeFormatVersion);
 	}
 	debug('Unknown type of EXE!');
 	return false;
@@ -44,64 +44,78 @@ function detectServiceExeVersion(buffer) {
 		if (name.equals(ptr.name))
 			return ptr.version;
 	}
+
+	// Legacy E-GOLD format
+	let size = buffer.readUInt32BE(buffer.length - SAG_JK_WH.length - 4);
+	if (size < buffer.length)
+		return 0;
+
 	return -1;
 }
 
 // From WinSwup
 function extractFromServiceExe(buffer, version) {
-	let out = [];
+	let blocks = [];
 	let offset;
 	let size;
+	let cipherKeyLength;
+	let cipherKey;
 
-	let verions = {
-		1: [108, 204],
-		2: [114, 210],
-	};
+	if (version == 0) {
+		offset = buffer.length - SAG_JK_WH.length - 4;
+		size = buffer.readUInt32BE(offset) + SAG_JK_WH.length + 4;
+		blocks[0] = { offset: buffer.length - size, size };
+	} else {
+		let verions = {
+			1: { metaOffset: 108 },
+			2: { metaOffset: 114 },
+		};
 
-	if (!(version in verions)) {
-		debug(`Unknown xbi version: ${version}`);
-		return false;
-	}
-
-	// Block 0
-	offset = buffer.length - verions[version][0];
-	size = readBits(buffer.slice(offset));
-	out[0] = { size, offset: offset - size };
-
-	if (version == 2) {
-		// Block 1
-		offset = out[0].offset - 32;
-		size = readBits(buffer.slice(offset));
-		out[2] = { size, offset: offset - size };
-
-		// Block 2
-		offset = out[2].offset - 32;
-		size = readBits(buffer.slice(offset));
-		out[1] = { size, offset: offset - size };
-
-		// Block 3
-		offset = out[1].offset - 32;
-		size = readBits(buffer.slice(offset));
-		out[3] = { size, offset: offset - size };
-	}
-
-	let cipherKeyLength = Math.min(...out.filter((b) => b.size > 0).map((b) => b.offset));
-	// let cipherKeyLength = buffer.length - (out[0].size + out[1].size + out[2].size + out[3].size + verions[version][1]);
-	let cipherKey = buffer.subarray(0, cipherKeyLength);
-	debug(`cipherKeyLength=${cipherKeyLength}`);
-
-	// Decrypt blocks
-	let payloads = [];
-	for (let i = 0; i < out.length; i++) {
-		if (out[i].offset < 0 || out[i].offset >= buffer.length || out[i].offset + out[i].size > buffer.length) {
-			debug(sprintf("BLOCK %08X %08X is out of range!", out[i].offset, out[i].size));
+		if (!(version in verions)) {
+			debug(`Unknown xbi version: ${version}`);
 			return false;
 		}
 
-		if (out[i].size) {
-			debug(sprintf("BLOCK %08X %08X", out[i].offset, out[i].size));
-			let payload = Buffer.from(buffer.subarray(out[i].offset, out[i].offset + out[i].size));
-			applyXor(payload, cipherKey);
+		// Block 0
+		offset = buffer.length - verions[version].metaOffset;
+		size = readBits(buffer.slice(offset));
+		blocks[0] = { size, offset: offset - size };
+
+		if (version == 2) {
+			// Block 1
+			offset = blocks[0].offset - 32;
+			size = readBits(buffer.slice(offset));
+			blocks[2] = { size, offset: offset - size };
+
+			// Block 2
+			offset = blocks[2].offset - 32;
+			size = readBits(buffer.slice(offset));
+			blocks[1] = { size, offset: offset - size };
+
+			// Block 3
+			offset = blocks[1].offset - 32;
+			size = readBits(buffer.slice(offset));
+			blocks[3] = { size, offset: offset - size };
+		}
+
+		cipherKeyLength = Math.min(...blocks.filter((b) => b.size > 0).map((b) => b.offset));
+		cipherKey = buffer.subarray(0, cipherKeyLength);
+		debug(`cipherKeyLength=${cipherKeyLength}`);
+	}
+
+	// Extract blocks
+	let payloads = [];
+	for (let i = 0; i < blocks.length; i++) {
+		if (blocks[i].offset < 0 || blocks[i].offset >= buffer.length || blocks[i].offset + blocks[i].size > buffer.length) {
+			debug(sprintf("BLOCK %08X %08X is out of range!", blocks[i].offset, blocks[i].size));
+			return false;
+		}
+
+		if (blocks[i].size) {
+			debug(sprintf("BLOCK %08X %08X", blocks[i].offset, blocks[i].size));
+			let payload = Buffer.from(buffer.subarray(blocks[i].offset, blocks[i].offset + blocks[i].size));
+			if (cipherKey != null)
+				applyXor(payload, cipherKey);
 			payloads[i] = payload;
 		}
 	}

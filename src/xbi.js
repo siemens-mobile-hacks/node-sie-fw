@@ -2,6 +2,8 @@ import { sprintf } from "sprintf-js";
 import createDebug from 'debug';
 const debug = createDebug('fw');
 
+const SAG_JK_WH = Buffer.from('SAG_JK_WH');
+
 const XBI_FORMATS = [
 	{
 		signatureID: Buffer.from("Siemens Mobile Phones:SIGNATURE:01.00"),
@@ -77,6 +79,14 @@ export function parseXbi(buffer) {
 	debug("XBI version: " + xbiFormat.version);
 	debug("XBI signed: " + xbiFormat.signed);
 
+	if (xbiFormat.version == 24 && buffer.subarray(buffer.length - SAG_JK_WH.length).equals(SAG_JK_WH)) {
+		let size = buffer.readUInt32BE(buffer.length - SAG_JK_WH.length - 4) + SAG_JK_WH.length + 4;
+		if (size == buffer.length) {
+			buffer = buffer.subarray(0, buffer.length - SAG_JK_WH.length - 4);
+			debug("Removing trailing SAG_JK_WH header!");
+		}
+	}
+
 	let info = {
 		signed: xbiFormat.signed,
 		writes: []
@@ -140,7 +150,6 @@ export function parseXbi(buffer) {
 
 	while (offset < buffer.length) {
 		let [size, frame] = decodeXbiWriteFrame(xbiFormat.version, buffer.slice(offset), offset);
-		debug(sprintf("[write] %08X %08X", frame.addr, frame.size));
 		offset += size;
 		info.writes.push(frame);
 	}
@@ -156,6 +165,7 @@ export function convertXbiToFlash(buffer) {
 
 	let writeFlash = (addr, buffer) => {
 		let localOffset = (addr & ~0xF0000000);
+		debug(sprintf("[write] %08X %08X", addr, buffer.size));
 		buffer.copy(flash, localOffset);
 	};
 
