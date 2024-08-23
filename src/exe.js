@@ -83,7 +83,8 @@ function extractFromServiceExe(buffer, version) {
 	size = readBits(buffer.slice(offset));
 	out[3] = { size, offset: offset - size };
 
-	let cipherKeyLength = buffer.length - (out[0].size + out[1].size + out[2].size + out[3].size + verions[version][1]);
+	let cipherKeyLength = Math.min(...out.filter((b) => b.size > 0).map((b) => b.offset));
+	// let cipherKeyLength = buffer.length - (out[0].size + out[1].size + out[2].size + out[3].size + verions[version][1]);
 	let cipherKey = buffer.subarray(0, cipherKeyLength);
 	debug(`cipherKeyLength=${cipherKeyLength}`);
 
