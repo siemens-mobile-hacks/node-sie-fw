@@ -37,6 +37,22 @@ export function extractFromExe(buffer) {
 	return false;
 }
 
+export function extractUpdaterFromExe(buffer) {
+	switch (detectExeType(buffer)) {
+		case "update":
+			debug('Detected type: xbi update (SAG_UDT)');
+			return extractFromUpdateExe(buffer, true);
+
+		case "service":
+			debug('Detected type: xbi service (SAG_JK_WH)');
+			let exeFormatVersion = detectServiceExeVersion(buffer);
+			debug(`exeFormatVersion=${exeFormatVersion}`);
+			return extractFromServiceExe(buffer, exeFormatVersion, true);
+	}
+	debug('Unknown type of EXE!');
+	return false;
+}
+
 function detectServiceExeVersion(buffer) {
 	for (let ptr of SERVICE_EXE_VERSIONS) {
 		let offset = buffer.length - SAG_JK_WH.length - 5;
@@ -54,7 +70,7 @@ function detectServiceExeVersion(buffer) {
 }
 
 // From WinSwup
-function extractFromServiceExe(buffer, version) {
+function extractFromServiceExe(buffer, version, extractExe = false) {
 	let blocks = [];
 	let offset;
 	let size;
@@ -103,6 +119,12 @@ function extractFromServiceExe(buffer, version) {
 		debug(`cipherKeyLength=${cipherKeyLength}`);
 	}
 
+	if (extractExe) {
+		let minOffset = Math.min(...blocks.filter((b) => b.size > 0).map((b) => b.offset));
+		debug(`Updater exe size: ${minOffset}`);
+		return Buffer.from(buffer.subarray(0, minOffset));
+	}
+
 	// Extract blocks
 	let payloads = [];
 	for (let i = 0; i < blocks.length; i++) {
@@ -130,7 +152,7 @@ function readBits(ptr) {
     return Number(result);
 }
 
-function extractFromUpdateExe(buffer) {
+function extractFromUpdateExe(buffer, extractExe = false) {
 	let aes = findAesKeys(buffer) || findAesKeysV2(buffer);
 	if (!aes) {
 		debug("Can't find AES KEY & IV in exe!");
@@ -160,6 +182,11 @@ function extractFromUpdateExe(buffer) {
 	if (type != 1) {
 		debug(`Invalid type: 0x${type.toString(16)}`);
 		return false;
+	}
+
+	if (extractExe) {
+		debug(`Updater exe size: ${payloadOffset}`);
+		return Buffer.from(buffer.subarray(0, payloadOffset));
 	}
 
 	let payload = buffer.slice(payloadOffset, payloadOffset + payloadSize);
