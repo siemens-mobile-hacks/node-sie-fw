@@ -28,10 +28,10 @@ export function extractFromExe(buffer) {
 			return extractFromUpdateExe(buffer);
 
 		case "service":
-			debug('Detected type: xbz service (SAG_JK_WH)');
-			let xbzFormatVersion = detectServiceExeVersion(buffer);
-			debug(`xbzFormatVersion=${xbzFormatVersion}`);
-			return extractFromServiceExe(buffer, xbzFormatVersion);
+			debug('Detected type: xbi service (SAG_JK_WH)');
+			let xbiFormatVersion = detectServiceExeVersion(buffer);
+			debug(`xbiFormatVersion=${xbiFormatVersion}`);
+			return extractFromServiceExe(buffer, xbiFormatVersion);
 	}
 	debug('Unknown type of EXE!');
 	return false;
@@ -59,7 +59,7 @@ function extractFromServiceExe(buffer, version) {
 	};
 
 	if (!(version in verions)) {
-		debug(`Unknown xbz version: ${version}`);
+		debug(`Unknown xbi version: ${version}`);
 		return false;
 	}
 

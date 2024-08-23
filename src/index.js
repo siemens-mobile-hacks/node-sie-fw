@@ -1,3 +1,3 @@
 export * from './exe.js';
-export * from './xbz.js';
+export * from './xbi.js';
 export * from './swupik.js';

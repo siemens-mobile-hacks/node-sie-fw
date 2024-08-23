@@ -2,7 +2,7 @@ import { sprintf } from "sprintf-js";
 import createDebug from 'debug';
 const debug = createDebug('fw');
 
-const XBZ_FORMATS = [
+const XBI_FORMATS = [
 	{
 		signatureID: Buffer.from("Siemens Mobile Phones:SIGNATURE:01.00"),
 		softwareID: Buffer.from("Siemens Mobile Phones:SOFTWARE:01.00"),
@@ -16,7 +16,7 @@ const XBZ_FORMATS = [
 	},
 ];
 
-const XBZ_FILEDS = {
+const XBI_FILEDS = {
 	0x12:	['reconfigureTime', 'str'],
 	0x13:	['linkTime', 'str'],
 	0x16:	['releaseType', 'str'],
@@ -50,11 +50,11 @@ const XBZ_FILEDS = {
 	0x70:	['dll', 'str2'],
 };
 
-const XBZ_FILEDS2 = {
+const XBI_FILEDS2 = {
 	0x5C:	['dataFlash[]', 'region'],
 };
 
-const XBZ_TYPES = {
+const XBI_TYPES = {
 	0:	'MobSw',
 	1:	'Eesimu',
 	2:	'VoiceMemo',
@@ -65,45 +65,45 @@ const XBZ_TYPES = {
 	7:	'ExtendedNewSplit',
 };
 
-export function isXbz(buffer) {
-	return detectXbzFormat(buffer) != null;
+export function isXbi(buffer) {
+	return detectXbiFormat(buffer) != null;
 }
 
-export function parseXbz(buffer) {
-	let xbzFormat = detectXbzFormat(buffer);
-	if (!xbzFormat)
+export function parseXbi(buffer) {
+	let xbiFormat = detectXbiFormat(buffer);
+	if (!xbiFormat)
 		return null;
 
-	debug("XBZ version: " + xbzFormat.version);
-	debug("XBZ signed: " + xbzFormat.signed);
+	debug("XBI version: " + xbiFormat.version);
+	debug("XBI signed: " + xbiFormat.signed);
 
 	let info = {
-		signed: xbzFormat.signed,
+		signed: xbiFormat.signed,
 		writes: []
 	};
 
-	let offset = xbzFormat.offset;
+	let offset = xbiFormat.offset;
 	while (offset < buffer.length) {
-		let [size, frame] = decodeXbzFrame(0xFE, xbzFormat.version, buffer.slice(offset));
+		let [size, frame] = decodeXbiFrame(0xFE, xbiFormat.version, buffer.slice(offset));
 		offset += size;
 
 		if (frame.cmd == 0x04) // EOF
 			break;
 
-		if (!XBZ_FILEDS[frame.cmd]) {
+		if (!XBI_FILEDS[frame.cmd]) {
 			debug(sprintf("[info] %02X: unknown", frame.cmd), frame.value);
 			continue;
 		}
 
-		let [key, type] = XBZ_FILEDS[frame.cmd];
+		let [key, type] = XBI_FILEDS[frame.cmd];
 		if (key.endsWith('[]')) {
 			let shortKey = key.substr(0, key.length - 2);
 			info[shortKey] = info[shortKey] || [];
-			let decodedValue = decodeXbzInfoField(type, xbzFormat.key, frame.value);
+			let decodedValue = decodeXbiInfoField(type, xbiFormat.key, frame.value);
 			info[shortKey].push(decodedValue);
 			debug(sprintf("[info] %02X: %s =", frame.cmd, key), decodedValue);
 		} else {
-			info[key] = decodeXbzInfoField(type, xbzFormat.key, frame.value);
+			info[key] = decodeXbiInfoField(type, xbiFormat.key, frame.value);
 			debug(sprintf("[info] %02X: %s =", frame.cmd, key), info[key]);
 		}
 	}
@@ -114,32 +114,32 @@ export function parseXbz(buffer) {
 	}
 
 	while (offset < buffer.length) {
-		if (!isXbzFrame(0xFF, xbzFormat.version, buffer.slice(offset)))
+		if (!isXbiFrame(0xFF, xbiFormat.version, buffer.slice(offset)))
 			break;
 
-		let [size, frame] = decodeXbzFrame(0xFF, xbzFormat.version, buffer.slice(offset));
+		let [size, frame] = decodeXbiFrame(0xFF, xbiFormat.version, buffer.slice(offset));
 		offset += size;
 
-		if (!XBZ_FILEDS2[frame.cmd]) {
+		if (!XBI_FILEDS2[frame.cmd]) {
 			debug(sprintf("[info] %02X: unknown", frame.cmd), frame.value);
 			continue;
 		}
 
-		let [key, type] = XBZ_FILEDS2[frame.cmd];
+		let [key, type] = XBI_FILEDS2[frame.cmd];
 		if (key.endsWith('[]')) {
 			let shortKey = key.substr(0, key.length - 2);
 			info[shortKey] = info[shortKey] || [];
-			let decodedValue = decodeXbzInfoField(type, xbzFormat.key, frame.value);
+			let decodedValue = decodeXbiInfoField(type, xbiFormat.key, frame.value);
 			info[shortKey].push(decodedValue);
 			debug(sprintf("[info] %02X: %s =", frame.cmd, key), decodedValue);
 		} else {
-			info[key] = decodeXbzInfoField(type, xbzFormat.key, frame.value);
+			info[key] = decodeXbiInfoField(type, xbiFormat.key, frame.value);
 			debug(sprintf("[info] %02X: %s =", frame.cmd, key), info[key]);
 		}
 	}
 
 	while (offset < buffer.length) {
-		let [size, frame] = decodeXbzWriteFrame(xbzFormat.version, buffer.slice(offset), offset);
+		let [size, frame] = decodeXbiWriteFrame(xbiFormat.version, buffer.slice(offset), offset);
 		debug(sprintf("[write] %08X %08X", frame.addr, frame.size));
 		offset += size;
 		info.writes.push(frame);
@@ -148,10 +148,10 @@ export function parseXbz(buffer) {
 	return info;
 }
 
-export function convertXbzToFlash(buffer) {
-	let xbz = parseXbz(buffer);
+export function convertXbiToFlash(buffer) {
+	let xbi = parseXbi(buffer);
 
-	let flash = Buffer.alloc(xbz.flashSize);
+	let flash = Buffer.alloc(xbi.flashSize);
 	flash.fill(0xFF, 0);
 
 	let writeFlash = (addr, buffer) => {
@@ -159,24 +159,24 @@ export function convertXbzToFlash(buffer) {
 		buffer.copy(flash, localOffset);
 	};
 
-	if (xbz.compressionType == 3) {
-		let decompressor = xbzDecompressor(writeFlash);
+	if (xbi.compressionType == 3) {
+		let decompressor = xbiDecompressor(writeFlash);
 		let finished = false;
-		for (let w of xbz.writes)
+		for (let w of xbi.writes)
 			finished = decompressor(buffer.subarray(w.offset, w.offset + w.size));
 		if (!finished)
 			throw new Error(`Unexpected EOF.`);
-	} else if (xbz.compressionType == 0) {
-		for (let w of xbz.writes)
+	} else if (xbi.compressionType == 0) {
+		for (let w of xbi.writes)
 			writeFlash(w.addr, buffer.subarray(w.offset, w.offset + w.size));
 	} else {
-		throw new Error(`Unknown compression type: ${xbz.compressionType}`);
+		throw new Error(`Unknown compression type: ${xbi.compressionType}`);
 	}
 
 	return flash;
 }
 
-function decodeXbzWriteFrame(version, buffer, offset) {
+function decodeXbiWriteFrame(version, buffer, offset) {
 	if (version == 24) {
 		let addr = (buffer.readUInt8(0) << 16) | (buffer.readUInt8(1) << 8) | (buffer.readUInt8(2));
 		let size = buffer.readUInt8(3);
@@ -201,7 +201,7 @@ function decodeXbzWriteFrame(version, buffer, offset) {
 	throw new Error(`Unknown version: ${version}`);
 }
 
-function isXbzFrame(frameType, version, buffer) {
+function isXbiFrame(frameType, version, buffer) {
 	if (version == 24) {
 		let type = (buffer.readUInt8(0) << 16) | (buffer.readUInt8(1) << 8) | (buffer.readUInt8(2));
 		return type == (0xFFFF00 | frameType);
@@ -212,8 +212,8 @@ function isXbzFrame(frameType, version, buffer) {
 	throw new Error(`Unknown version: ${version}`);
 }
 
-function decodeXbzFrame(frameType, version, buffer) {
-	if (!isXbzFrame(frameType, version, buffer))
+function decodeXbiFrame(frameType, version, buffer) {
+	if (!isXbiFrame(frameType, version, buffer))
 		throw new Error(`Invalid ${sprintf("%02X", frameType)} frame!`);
 
 	if (version == 24) {
@@ -249,7 +249,7 @@ function calcChecksum(buffer, size) {
 	return chk;
 }
 
-function decodeXbzInfoField(type, key, value) {
+function decodeXbiInfoField(type, key, value) {
 	switch (type) {
 		case "str":
 			return decryptString(key, value).toString();
@@ -268,7 +268,7 @@ function decodeXbzInfoField(type, key, value) {
 		case "svn":
 			return parseInt(value.readUint16LE(0).toString(16).padStart(4, '0').toUpperCase()) / 100;
 		case "type":
-			return XBZ_TYPES[value.readUint8(0)] || `unknown_${value.readUint8(0)}`;
+			return XBI_TYPES[value.readUint8(0)] || `unknown_${value.readUint8(0)}`;
 		case "region":
 			return { from: value.readUint32BE(0), to: value.readUint32BE(4) };
 		case "swCode":
@@ -286,8 +286,8 @@ function decryptString(key, value) {
 	return value;
 }
 
-function detectXbzFormat(buffer) {
-	for (let format of XBZ_FORMATS) {
+export function detectXbiFormat(buffer) {
+	for (let format of XBI_FORMATS) {
 		// Signed
 		if (format.signatureID.equals(buffer.subarray(0, format.signatureID.length))) {
 			let softwareOffset = buffer.indexOf(format.softwareID);
@@ -315,7 +315,7 @@ function detectXbzFormat(buffer) {
 	return null;
 }
 
-function xbzDecompressor(onWrite) {
+function xbiDecompressor(onWrite) {
 	let state = 0;
 	let checksum = 0;
 	let blockSize = 0;
