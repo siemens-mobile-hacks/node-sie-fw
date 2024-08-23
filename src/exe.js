@@ -211,7 +211,7 @@ function findAesKeys(exe) {
 		if (keyIndex < 0)
 			return false;
 
-		lastIndex = keyIndex;
+		lastIndex = keyIndex + 1;
 
 		let instrOffset1 = keyIndex - 5;
 		let instr1 = exe.slice(instrOffset1, instrOffset1 + 5);
@@ -251,7 +251,7 @@ function findAesKeysV2(exe) {
 		if (keyIndex < 0)
 			return false;
 
-		lastIndex = keyIndex;
+		lastIndex = keyIndex + 1;
 
 		let instrOffset1 = keyIndex - 5;
 		let instr1 = exe.slice(instrOffset1, instrOffset1 + 5);
