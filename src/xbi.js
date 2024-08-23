@@ -165,7 +165,7 @@ export function convertXbiToFlash(buffer) {
 
 	let writeFlash = (addr, buffer) => {
 		let localOffset = (addr & ~0xF0000000);
-		debug(sprintf("[write] %08X %08X", addr, buffer.size));
+		debug(sprintf("[write] %08X %08X", addr, buffer.length));
 		buffer.copy(flash, localOffset);
 	};
 
