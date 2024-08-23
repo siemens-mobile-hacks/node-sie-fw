@@ -54,8 +54,8 @@ function extractFromServiceExe(buffer, version) {
 	let size;
 
 	let verions = {
-		1: [0x6C, 204],
-		2: [0x72, 210],
+		1: [108, 204],
+		2: [114, 210],
 	};
 
 	if (!(version in verions)) {
@@ -68,20 +68,22 @@ function extractFromServiceExe(buffer, version) {
 	size = readBits(buffer.slice(offset));
 	out[0] = { size, offset: offset - size };
 
-	// Block 1
-	offset = out[0].offset - 32;
-	size = readBits(buffer.slice(offset));
-	out[2] = { size, offset: offset - size };
+	if (version == 2) {
+		// Block 1
+		offset = out[0].offset - 32;
+		size = readBits(buffer.slice(offset));
+		out[2] = { size, offset: offset - size };
 
-	// Block 2
-	offset = out[2].offset - 32;
-	size = readBits(buffer.slice(offset));
-	out[1] = { size, offset: offset - size };
+		// Block 2
+		offset = out[2].offset - 32;
+		size = readBits(buffer.slice(offset));
+		out[1] = { size, offset: offset - size };
 
-	// Block 3
-	offset = out[1].offset - 32;
-	size = readBits(buffer.slice(offset));
-	out[3] = { size, offset: offset - size };
+		// Block 3
+		offset = out[1].offset - 32;
+		size = readBits(buffer.slice(offset));
+		out[3] = { size, offset: offset - size };
+	}
 
 	let cipherKeyLength = Math.min(...out.filter((b) => b.size > 0).map((b) => b.offset));
 	// let cipherKeyLength = buffer.length - (out[0].size + out[1].size + out[2].size + out[3].size + verions[version][1]);
@@ -90,7 +92,7 @@ function extractFromServiceExe(buffer, version) {
 
 	// Decrypt blocks
 	let payloads = [];
-	for (let i = 0; i < 4; i++) {
+	for (let i = 0; i < out.length; i++) {
 		if (out[i].offset < 0 || out[i].offset >= buffer.length || out[i].offset + out[i].size > buffer.length) {
 			debug(sprintf("BLOCK %08X %08X is out of range!", out[i].offset, out[i].size));
 			return false;
