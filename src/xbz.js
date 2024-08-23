@@ -166,9 +166,11 @@ export function convertXbzToFlash(buffer) {
 			finished = decompressor(buffer.subarray(w.offset, w.offset + w.size));
 		if (!finished)
 			throw new Error(`Unexpected EOF.`);
-	} else {
+	} else if (xbz.compressionType == 0) {
 		for (let w of xbz.writes)
 			writeFlash(w.addr, buffer.subarray(w.offset, w.offset + w.size));
+	} else {
+		throw new Error(`Unknown compression type: ${xbz.compressionType}`);
 	}
 
 	return flash;
