@@ -71,7 +71,7 @@ export function isXbi(buffer) {
 	return detectXbiFormat(buffer) != null;
 }
 
-export function parseXbi(buffer) {
+export function parseXbi(buffer, onlyHeader = false) {
 	let xbiFormat = detectXbiFormat(buffer);
 	if (!xbiFormat)
 		return null;
@@ -89,6 +89,7 @@ export function parseXbi(buffer) {
 
 	let info = {
 		signed: xbiFormat.signed,
+		valid: true,
 		writes: []
 	};
 
@@ -148,10 +149,16 @@ export function parseXbi(buffer) {
 		}
 	}
 
-	while (offset < buffer.length) {
-		let [size, frame] = decodeXbiWriteFrame(xbiFormat.version, buffer.slice(offset), offset);
-		offset += size;
-		info.writes.push(frame);
+	try {
+		while (offset < buffer.length) {
+			let [size, frame] = decodeXbiWriteFrame(xbiFormat.version, buffer.slice(offset), offset);
+			offset += size;
+			info.writes.push(frame);
+		}
+	} catch (e) {
+		if (!onlyHeader)
+			throw e;
+		info.valid = false;
 	}
 
 	return info;
@@ -160,7 +167,7 @@ export function parseXbi(buffer) {
 export function getXbiExtension(xbi) {
 	if (xbi.updateType == 'ExtendedNewSplit') {
 		return 'xfs';
-	} else if (xbiInfo.databaseName == 'klf_bootcore') {
+	} else if (xbi.databaseName == 'klf_bootcore') {
 		return 'xbb';
 	}
 	return xbi.compressionType == 0 ? 'xbi' : 'xbz';
