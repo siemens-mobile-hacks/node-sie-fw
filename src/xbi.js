@@ -30,7 +30,7 @@ const XBI_FILEDS = {
 	0x23:	['flashSize', 'uint32be'],
 	0x28:	['model', 'str'],
 	0x29:	['vendor', 'str'],
-	0x2A:	['baseline0', 'str'],
+	0x2A:	['baseline', 'str'],
 	0x30:	['eraseRegions[]', 'region'],
 	0x37:	['swCode', 'swCode'],
 	0x34:	['projectType', 'uint8'],
@@ -44,9 +44,9 @@ const XBI_FILEDS = {
 	0x56:	['hashAreaSize', 'uint16le'],
 
 	0x60:	['t9', 'uint8'],
-	0x61:	['baseline1', 'str'],
-	0x62:	['baseline2', 'str'],
-	0x63:	['baseline3', 'str'],
+	0x61:	['databaseName', 'str'],
+	0x62:	['baselineVersion', 'str'],
+	0x63:	['baselineRelease', 'str'],
 
 	0x64:	['mobileName', 'str2'],
 	0x70:	['dll', 'str2'],
@@ -157,8 +157,17 @@ export function parseXbi(buffer) {
 	return info;
 }
 
-export function convertXbiToFlash(buffer) {
-	let xbi = parseXbi(buffer);
+export function getXbiExtension(xbi) {
+	if (xbi.updateType == 'ExtendedNewSplit') {
+		return 'xfs';
+	} else if (xbiInfo.databaseName == 'klf_bootcore') {
+		return 'xbb';
+	}
+	return xbi.compressionType == 0 ? 'xbi' : 'xbz';
+}
+
+export function convertXbiToFlash(buffer, xbi = null) {
+	xbi = xbi || parseXbi(buffer);
 
 	let flash = Buffer.alloc(xbi.flashSize);
 	flash.fill(0xFF, 0);
