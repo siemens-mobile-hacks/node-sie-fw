@@ -29,7 +29,7 @@ export function extractFromExe(buffer) {
 
 		case "service":
 			debug('Detected type: xbi service (SAG_JK_WH)');
-			let exeFormatVersion = detectServiceExeVersion(buffer);
+			let exeFormatVersion = detectServiceExeFormatVersion(buffer);
 			debug(`exeFormatVersion=${exeFormatVersion}`);
 			return extractFromServiceExe(buffer, exeFormatVersion);
 	}
@@ -45,7 +45,7 @@ export function extractUpdaterFromExe(buffer) {
 
 		case "service":
 			debug('Detected type: xbi service (SAG_JK_WH)');
-			let exeFormatVersion = detectServiceExeVersion(buffer);
+			let exeFormatVersion = detectServiceExeFormatVersion(buffer);
 			debug(`exeFormatVersion=${exeFormatVersion}`);
 			return extractFromServiceExe(buffer, exeFormatVersion, true);
 	}
@@ -53,7 +53,7 @@ export function extractUpdaterFromExe(buffer) {
 	return false;
 }
 
-function detectServiceExeVersion(buffer) {
+export function detectServiceExeFormatVersion(buffer) {
 	for (let ptr of SERVICE_EXE_VERSIONS) {
 		let offset = buffer.length - SAG_JK_WH.length - 5;
 		let name = buffer.slice(offset - ptr.name.length, offset);
