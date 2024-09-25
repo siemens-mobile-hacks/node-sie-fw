@@ -91,7 +91,8 @@ export function parseXbi(buffer, onlyHeader = false) {
 		signed: xbiFormat.signed,
 		valid: true,
 		writes: [],
-		size: buffer.length
+		size: buffer.length,
+		compressionType: 0,
 	};
 
 	let offset = xbiFormat.offset;
