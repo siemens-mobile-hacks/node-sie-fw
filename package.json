@@ -1,11 +1,17 @@
 {
 	"name": "@sie-js/fw",
 	"version": "1.0.15",
-	"main": "src/index.js",
 	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": [
+		"/dist"
+	],
 	"scripts": {
+		"build": "tsc",
+		"watch": "tsc --watch",
 		"test": "echo \"Error: no test specified\" && exit 1",
-		"pub": "npm publish --access public"
+		"pub": "tsc && npm publish --access public"
 	},
 	"author": "",
 	"license": "MIT",
@@ -17,5 +23,11 @@
 	},
 	"repository": {
 		"url": "git+https://github.com/siemens-mobile-hacks/node-sie-fw.git"
+	},
+	"devDependencies": {
+		"@types/debug": "^4.1.12",
+		"@types/node": "^22.10.5",
+		"@types/sprintf-js": "^1.1.4",
+		"typescript": "^5.7.3"
 	}
 }

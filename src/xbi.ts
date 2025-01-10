@@ -18,7 +18,9 @@ const XBI_FORMATS = [
 	},
 ];
 
-const XBI_FILEDS = {
+type XbiFieldsParser = Record<number, [string, "str" | "str2" | "buffer" | "type" | "svn" | "uint32be" | "uint16be" | "uint16le" | "uint8" | "swCode" | "region"]>;
+
+const XBI_FILEDS: XbiFieldsParser = {
 	0x12:	['reconfigureTime', 'str'],
 	0x13:	['linkTime', 'str'],
 	0x16:	['releaseType', 'str'],
@@ -52,11 +54,11 @@ const XBI_FILEDS = {
 	0x70:	['dll', 'str2'],
 };
 
-const XBI_FILEDS2 = {
+const XBI_FILEDS2: XbiFieldsParser = {
 	0x5C:	['dataFlash[]', 'region'],
 };
 
-const XBI_TYPES = {
+const XBI_TYPES: Record<number, string> = {
 	0:	'MobSw',
 	1:	'Eesimu',
 	2:	'VoiceMemo',
@@ -67,27 +69,97 @@ const XBI_TYPES = {
 	7:	'ExtendedNewSplit',
 };
 
-export function isXbi(buffer) {
+export type XbiFrame = {
+	size: number;
+	cmd: number;
+	value: Buffer;
+	chk: number;
+};
+
+export type XbiWriteFrame = {
+	addr: number;
+	size: number;
+	offset: number;
+};
+
+export type XbiInfoWrite = {
+	offset: number;
+	addr: number;
+	size: number;
+};
+
+export type XbiFormat = {
+	signed: boolean;
+	offset: number;
+	signatureSize: number;
+	key: Buffer;
+	version: number;
+};
+
+export type XbiInfoSwCode = {
+	addr: number;
+	value: number;
+};
+
+export type XbiInfoMemoryRegion = {
+	from: number;
+	to: number;
+};
+
+export type XbiInfo = {
+	signed: boolean;
+	valid: boolean;
+	writes: XbiInfoWrite[];
+	size: number;
+	compressionType: number;
+	compressionInfo?: Buffer;
+	reconfigureTime?: string;
+	linkTime?: string;
+	releaseType?: string;
+	productCode?: string;
+	langpack?: string;
+	svn?: number;
+	flashSize?: number;
+	model?: string;
+	vendor?: string;
+	baseline?: string;
+	swCode?: XbiInfoSwCode;
+	projectType?: number;
+	updateType?: string;
+	mapInfoSize?: number;
+	mapInfo?: Buffer[];
+	hashAreaSize?: number;
+	t9?: number;
+	databaseName?: string;
+	baselineVersion?: string;
+	baselineRelease?: string;
+	mobileName?: string;
+	dll?: string;
+	eraseRegions?: XbiInfoMemoryRegion[];
+	dataFlash?: XbiInfoMemoryRegion[];
+};
+
+export function isXbi(buffer: Buffer) {
 	return detectXbiFormat(buffer) != null;
 }
 
-export function parseXbi(buffer, onlyHeader = false) {
-	let xbiFormat = detectXbiFormat(buffer);
+export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo | undefined {
+	const xbiFormat = detectXbiFormat(buffer);
 	if (!xbiFormat)
-		return null;
+		return undefined;
 
 	debug("XBI version: " + xbiFormat.version);
 	debug("XBI signed: " + xbiFormat.signed);
 
 	if (xbiFormat.version == 24 && buffer.subarray(buffer.length - SAG_JK_WH.length).equals(SAG_JK_WH)) {
-		let size = buffer.readUInt32BE(buffer.length - SAG_JK_WH.length - 4) + SAG_JK_WH.length + 4;
+		const size = buffer.readUInt32BE(buffer.length - SAG_JK_WH.length - 4) + SAG_JK_WH.length + 4;
 		if (size == buffer.length) {
 			buffer = buffer.subarray(0, buffer.length - SAG_JK_WH.length - 4);
 			debug("Removing trailing SAG_JK_WH header!");
 		}
 	}
 
-	let info = {
+	const info: XbiInfo = {
 		signed: xbiFormat.signed,
 		valid: true,
 		writes: [],
@@ -97,7 +169,7 @@ export function parseXbi(buffer, onlyHeader = false) {
 
 	let offset = xbiFormat.offset;
 	while (offset < buffer.length) {
-		let [size, frame] = decodeXbiFrame(0xFE, xbiFormat.version, buffer.slice(offset));
+		const [size, frame] = decodeXbiFrame(0xFE, xbiFormat.version, buffer.subarray(offset));
 		offset += size;
 
 		if (frame.cmd == 0x04) // EOF
@@ -108,16 +180,17 @@ export function parseXbi(buffer, onlyHeader = false) {
 			continue;
 		}
 
-		let [key, type] = XBI_FILEDS[frame.cmd];
+		const infoRef = info as Record<string, any>;
+		const [key, type] = XBI_FILEDS[frame.cmd];
 		if (key.endsWith('[]')) {
-			let shortKey = key.substr(0, key.length - 2);
-			info[shortKey] = info[shortKey] || [];
-			let decodedValue = decodeXbiInfoField(type, xbiFormat.key, frame.value);
-			info[shortKey].push(decodedValue);
+			const shortKey = key.substring(0, key.length - 2);
+			infoRef[shortKey] = infoRef[shortKey] || [];
+			const decodedValue = decodeXbiInfoField(type, xbiFormat.key, frame.value);
+			infoRef[shortKey].push(decodedValue);
 			debug(sprintf("[info] %02X: %s =", frame.cmd, key), decodedValue);
 		} else {
-			info[key] = decodeXbiInfoField(type, xbiFormat.key, frame.value);
-			debug(sprintf("[info] %02X: %s =", frame.cmd, key), info[key]);
+			infoRef[key] = decodeXbiInfoField(type, xbiFormat.key, frame.value);
+			debug(sprintf("[info] %02X: %s =", frame.cmd, key), infoRef[key]);
 		}
 	}
 
@@ -127,10 +200,10 @@ export function parseXbi(buffer, onlyHeader = false) {
 	}
 
 	while (offset < buffer.length) {
-		if (!isXbiFrame(0xFF, xbiFormat.version, buffer.slice(offset)))
+		if (!isXbiFrame(0xFF, xbiFormat.version, buffer.subarray(offset)))
 			break;
 
-		let [size, frame] = decodeXbiFrame(0xFF, xbiFormat.version, buffer.slice(offset));
+		const [size, frame] = decodeXbiFrame(0xFF, xbiFormat.version, buffer.subarray(offset));
 		offset += size;
 
 		if (!XBI_FILEDS2[frame.cmd]) {
@@ -138,22 +211,23 @@ export function parseXbi(buffer, onlyHeader = false) {
 			continue;
 		}
 
-		let [key, type] = XBI_FILEDS2[frame.cmd];
+		const infoRef = info as Record<string, any>;
+		const [key, type] = XBI_FILEDS2[frame.cmd];
 		if (key.endsWith('[]')) {
-			let shortKey = key.substr(0, key.length - 2);
-			info[shortKey] = info[shortKey] || [];
-			let decodedValue = decodeXbiInfoField(type, xbiFormat.key, frame.value);
-			info[shortKey].push(decodedValue);
+			const shortKey = key.substr(0, key.length - 2);
+			infoRef[shortKey] = infoRef[shortKey] || [];
+			const decodedValue = decodeXbiInfoField(type, xbiFormat.key, frame.value);
+			infoRef[shortKey].push(decodedValue);
 			debug(sprintf("[info] %02X: %s =", frame.cmd, key), decodedValue);
 		} else {
-			info[key] = decodeXbiInfoField(type, xbiFormat.key, frame.value);
-			debug(sprintf("[info] %02X: %s =", frame.cmd, key), info[key]);
+			infoRef[key] = decodeXbiInfoField(type, xbiFormat.key, frame.value);
+			debug(sprintf("[info] %02X: %s =", frame.cmd, key), infoRef[key]);
 		}
 	}
 
 	try {
 		while (offset < buffer.length) {
-			let [size, frame] = decodeXbiWriteFrame(xbiFormat.version, buffer.slice(offset), offset);
+			const [size, frame] = decodeXbiWriteFrame(xbiFormat.version, buffer.subarray(offset), offset);
 			offset += size;
 			info.writes.push(frame);
 		}
@@ -166,7 +240,7 @@ export function parseXbi(buffer, onlyHeader = false) {
 	return info;
 }
 
-export function getXbiExtension(xbi) {
+export function getXbiExtension(xbi: XbiInfo) {
 	if (xbi.updateType == 'ExtendedNewSplit') {
 		return 'xfs';
 	} else if (xbi.databaseName == 'klf_bootcore') {
@@ -175,27 +249,32 @@ export function getXbiExtension(xbi) {
 	return xbi.compressionType == 0 ? 'xbi' : 'xbz';
 }
 
-export function convertXbiToFlash(buffer, xbi = null) {
-	xbi = xbi || parseXbi(buffer);
+export function convertXbiToFlash(buffer: Buffer, parsedXbi: XbiInfo | undefined = undefined) {
+	const xbi = parsedXbi ?? parseXbi(buffer);
+	if (!xbi)
+		throw new Error(`XBI is not parsed!`);
 
-	let flash = Buffer.alloc(xbi.flashSize);
+	if (!xbi.flashSize)
+		throw new Error(`No flash size in XbiInfo!`);
+
+	const flash = Buffer.alloc(xbi.flashSize);
 	flash.fill(0xFF, 0);
 
-	let writeFlash = (addr, buffer) => {
-		let localOffset = (addr & ~0xF0000000);
+	const writeFlash = (addr: number, buffer: Buffer) => {
+		const localOffset = (addr & ~0xF0000000);
 		debug(sprintf("[write] %08X %08X", addr, buffer.length));
 		buffer.copy(flash, localOffset);
 	};
 
 	if (xbi.compressionType == 3) {
-		let decompressor = xbiDecompressor(writeFlash);
+		const decompressor = xbiDecompressor(writeFlash);
 		let finished = false;
-		for (let w of xbi.writes)
+		for (const w of xbi.writes)
 			finished = decompressor(buffer.subarray(w.offset, w.offset + w.size));
 		if (!finished)
 			throw new Error(`Unexpected EOF.`);
 	} else if (xbi.compressionType == 0) {
-		for (let w of xbi.writes)
+		for (const w of xbi.writes)
 			writeFlash(w.addr, buffer.subarray(w.offset, w.offset + w.size));
 	} else {
 		throw new Error(`Unknown compression type: ${xbi.compressionType}`);
@@ -204,22 +283,22 @@ export function convertXbiToFlash(buffer, xbi = null) {
 	return flash;
 }
 
-function decodeXbiWriteFrame(version, buffer, offset) {
+function decodeXbiWriteFrame(version: number, buffer: Buffer, offset: number): [number, XbiWriteFrame] {
 	if (version == 24) {
-		let addr = (buffer.readUInt8(0) << 16) | (buffer.readUInt8(1) << 8) | (buffer.readUInt8(2));
-		let size = buffer.readUInt8(3);
-		let chk = buffer.readUInt8(4 + size);
-		let actualChk = calcChecksum(buffer, 4 + size);
+		const addr = (buffer.readUInt8(0) << 16) | (buffer.readUInt8(1) << 8) | (buffer.readUInt8(2));
+		const size = buffer.readUInt8(3);
+		const chk = buffer.readUInt8(4 + size);
+		const actualChk = calcChecksum(buffer, 4 + size);
 
 		if (chk != actualChk)
 			throw new Error(`Invalid chk: ${sprintf("%08X %04X CHK:%02X != %02X", addr, size, chk, actualChk)} at ${buffer.byteOffset}`);
 
 		return [ 4 + 1 + size, { addr, size, offset: offset + 4 } ];
 	} else if (version == 32) {
-		let addr = buffer.readUInt32BE(0);
-		let size = buffer.readUInt16BE(4);
-		let chk = buffer.readUInt8(6 + size);
-		let actualChk = calcChecksum(buffer, 6 + size);
+		const addr = buffer.readUInt32BE(0);
+		const size = buffer.readUInt16BE(4);
+		const chk = buffer.readUInt8(6 + size);
+		const actualChk = calcChecksum(buffer, 6 + size);
 
 		if (chk != actualChk)
 			throw new Error(`Invalid chk: ${sprintf("%08X %04X CHK:%02X != %02X", addr, size, chk, actualChk)} at ${buffer.byteOffset}`);
@@ -229,36 +308,36 @@ function decodeXbiWriteFrame(version, buffer, offset) {
 	throw new Error(`Unknown version: ${version}`);
 }
 
-function isXbiFrame(frameType, version, buffer) {
+function isXbiFrame(frameType: number, version: number, buffer: Buffer): boolean {
 	if (version == 24) {
-		let type = (buffer.readUInt8(0) << 16) | (buffer.readUInt8(1) << 8) | (buffer.readUInt8(2));
+		const type = (buffer.readUInt8(0) << 16) | (buffer.readUInt8(1) << 8) | (buffer.readUInt8(2));
 		return type == (0xFFFF00 | frameType);
 	} else if (version == 32) {
-		let type = buffer.readUInt32BE(0);
+		const type = buffer.readUInt32BE(0);
 		return type == (0xFFFFFF00 | frameType) >>> 0;
 	}
 	throw new Error(`Unknown version: ${version}`);
 }
 
-function decodeXbiFrame(frameType, version, buffer) {
+function decodeXbiFrame(frameType: number, version: number, buffer: Buffer): [number, XbiFrame] {
 	if (!isXbiFrame(frameType, version, buffer))
 		throw new Error(`Invalid ${sprintf("%02X", frameType)} frame!`);
 
 	if (version == 24) {
-		let size = buffer.readUInt8(3);
-		let cmd = buffer.readUInt8(4);
-		let value = buffer.subarray(5, 5 + size - 1);
-		let chk = buffer.readUInt8(5 + size - 1);
+		const size = buffer.readUInt8(3);
+		const cmd = buffer.readUInt8(4);
+		const value = buffer.subarray(5, 5 + size - 1);
+		const chk = buffer.readUInt8(5 + size - 1);
 
 		if (chk != calcChecksum(buffer, 5 + size - 1))
 			throw new Error(`Invalid chk: ${chk}`);
 
 		return [ 5 + size, { size, cmd, value, chk } ];
 	} else if (version == 32) {
-		let size = buffer.readUInt16BE(4);
-		let cmd = buffer.readUInt8(6);
-		let value = buffer.subarray(7, 7 + size - 1);
-		let chk = buffer.readUInt8(7 + size - 1);
+		const size = buffer.readUInt16BE(4);
+		const cmd = buffer.readUInt8(6);
+		const value = buffer.subarray(7, 7 + size - 1);
+		const chk = buffer.readUInt8(7 + size - 1);
 
 		if (chk != calcChecksum(buffer, 7 + size - 1))
 			throw new Error(`Invalid chk: ${chk}`);
@@ -268,7 +347,7 @@ function decodeXbiFrame(frameType, version, buffer) {
 	throw new Error(`Unknown version: ${version}`);
 }
 
-function calcChecksum(buffer, size) {
+function calcChecksum(buffer: Buffer, size: number) {
 	let chk = 0;
 	if (size > buffer.length)
 		throw new Error(`Truncated file! [${size} > ${buffer.length}]`);
@@ -277,7 +356,7 @@ function calcChecksum(buffer, size) {
 	return chk;
 }
 
-function decodeXbiInfoField(type, key, value) {
+function decodeXbiInfoField(type: string, key: Buffer, value: Buffer): string | number | XbiInfoMemoryRegion | XbiInfoSwCode | Buffer {
 	switch (type) {
 		case "str":
 			return decryptString(key, value).toString();
@@ -298,27 +377,27 @@ function decodeXbiInfoField(type, key, value) {
 		case "type":
 			return XBI_TYPES[value.readUint8(0)] || `unknown_${value.readUint8(0)}`;
 		case "region":
-			return { from: value.readUint32BE(0), to: value.readUint32BE(4) };
+			return { from: value.readUint32BE(0), to: value.readUint32BE(4) } as XbiInfoMemoryRegion;
 		case "swCode":
-			return { addr: value.readUint32BE(0), value: value.readUint32BE(4) };
+			return { addr: value.readUint32BE(0), value: value.readUint32BE(4) } as XbiInfoSwCode;
 		case "buffer":
 			return value;
 	}
 	throw new Error(`Unknown type: ${type}`);
 }
 
-function decryptString(key, value) {
+function decryptString(key: Buffer, value: Buffer) {
 	value = Buffer.from(value);
 	for (let i = 0; i < value.length; i++)
 		value[i] = value[i] ^ key[i % key.length];
 	return value;
 }
 
-export function detectXbiFormat(buffer) {
-	for (let format of XBI_FORMATS) {
+export function detectXbiFormat(buffer: Buffer): XbiFormat | undefined {
+	for (const format of XBI_FORMATS) {
 		// Signed
 		if (format.signatureID.equals(buffer.subarray(0, format.signatureID.length))) {
-			let softwareOffset = buffer.indexOf(format.softwareID);
+			const softwareOffset = buffer.indexOf(format.softwareID);
 			if (softwareOffset < 0)
 				continue;
 			return {
@@ -335,29 +414,30 @@ export function detectXbiFormat(buffer) {
 			return {
 				signed: false,
 				offset: format.softwareID.length + 1,
+				signatureSize: 0,
 				key: format.key,
 				version: format.version
 			};
 		}
 	}
-	return null;
+	return undefined;
 }
 
-function xbiDecompressor(onWrite) {
+function xbiDecompressor(onWrite: (addr: number, block: Buffer) => void) {
 	let state = 0;
 	let checksum = 0;
 	let blockSize = 0;
 	let blockAddr = 0;
 	let remainingBytes = 0;
-	let tempBuffer = Buffer.alloc(4096);
+	const tempBuffer = Buffer.alloc(4096);
 
-	let decompressor = lzssDecompressor();
+	const decompressor = lzssDecompressor();
 
-	return (buffer) => {
-		let decompressedData = decompressor(buffer);
+	return (buffer: Buffer) => {
+		const decompressedData = decompressor(buffer);
 
 		for (let i = 0; i < decompressedData.length; i++) {
-			let byte = decompressedData[i];
+			const byte = decompressedData[i];
 
 			checksum = checksum ^ byte;
 
@@ -435,21 +515,21 @@ function xbiDecompressor(onWrite) {
 }
 
 function lzssDecompressor() {
-	let decompressedBuffer = Buffer.alloc(4096);
-	let circularBuffer = Buffer.alloc(4096);
+	const decompressedBuffer = Buffer.alloc(4096);
+	const circularBuffer = Buffer.alloc(4096);
 	let circularBufferPos = 1;
 	let copyFrom = 0;
 	let state = 0;
 	let tempByte = 0;
 	let tempByteBitsCnt = 0;
 
-	return (buffer) => {
+	return (buffer: Buffer) => {
 		let decompressedSize = 0;
 
 		for (let i = 0; i < buffer.length; i++) {
-			let byte = buffer[i];
+			const byte = buffer[i];
 			for (let bitN = 0; bitN < 8; bitN++) {
-				let bit = (byte & (1 << (8 - bitN - 1))) != 0 ? 1 : 0;
+				const bit = (byte & (1 << (8 - bitN - 1))) != 0 ? 1 : 0;
 
 				switch (state) {
 					case 0:
@@ -488,7 +568,7 @@ function lzssDecompressor() {
 
 						if (tempByteBitsCnt == 4) {
 							for (let j = 0; j <= tempByte + 1; j++) {
-								let value = circularBuffer[(copyFrom + j) & 0xFFF];
+								const value = circularBuffer[(copyFrom + j) & 0xFFF];
 								decompressedBuffer[decompressedSize++] = value;
 								circularBuffer[circularBufferPos] = value;
 								circularBufferPos = (circularBufferPos + 1) & 0xFFF;
