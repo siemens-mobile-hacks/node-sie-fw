@@ -163,12 +163,6 @@ function readBits(ptr: Buffer): number {
 }
 
 function extractFromUpdateExe(buffer: Buffer, extractExe: boolean = false): Buffer[] | undefined {
-	const aes = findAesKeys(buffer) || findAesKeysV2(buffer);
-	if (!aes) {
-		debug("Can't find AES KEY & IV in exe!");
-		return undefined;
-	}
-
 	let payloadOffset = Number(
 		BigInt(buffer.readUInt8(buffer.length - 29)) |
 		(BigInt(buffer.readUInt8(buffer.length - 26)) << 24n) |
@@ -184,14 +178,24 @@ function extractFromUpdateExe(buffer: Buffer, extractExe: boolean = false): Buff
 		return undefined;
 	}
 
-	const type = buffer.readUInt16BE(payloadOffset);
-	debug(sprintf("type=%04X", type));
-	payloadOffset += 2;
-	payloadSize -= 2;
+	const encryptionType = buffer.readUInt16BE(payloadOffset);
+	debug(sprintf("encryptionType=%04X", encryptionType));
 
-	if (type != 1) {
-		debug(`Invalid type: 0x${type.toString(16)}`);
+	if (encryptionType != 1 && encryptionType != 0) {
+		debug(`Invalid encryptionType: 0x${encryptionType.toString(16)}`);
 		return undefined;
+	}
+
+	let aes: XbiAesKeys | undefined;
+	if (encryptionType == 1) {
+		payloadOffset += 2;
+		payloadSize -= 2;
+
+		aes = findAesKeys(buffer) || findAesKeysV2(buffer);
+		if (!aes) {
+			debug("Can't find AES KEY & IV in exe!");
+			return undefined;
+		}
 	}
 
 	if (extractExe) {
@@ -199,35 +203,42 @@ function extractFromUpdateExe(buffer: Buffer, extractExe: boolean = false): Buff
 		return [Buffer.from(buffer.subarray(0, payloadOffset))];
 	}
 
-	const payload = buffer.subarray(payloadOffset, payloadOffset + payloadSize);
-	const signTime = payload.readUInt32BE(0);
-	const signSize = payload.readUInt32BE(4);
-	const encryptedSign = payload.subarray(8, 8 + signSize);
-	const encryptedBody = payload.subarray(8 + signSize);
+	if (aes) {
+		const payload = buffer.subarray(payloadOffset, payloadOffset + payloadSize);
+		const signTime = payload.readUInt32BE(0);
+		const signSize = payload.readUInt32BE(4);
+		const encryptedSign = payload.subarray(8, 8 + signSize);
+		const encryptedBody = payload.subarray(8 + signSize);
 
-	debug(`signTime=${(new Date(signTime * 1000)).toUTCString()}`);
-	debug(`signSize=${signSize}`);
-	debug(`encryptedSign=${encryptedSign.toString('hex')}`);
-	debug(`encryptedBodySize=${encryptedBody.length}`);
+		debug(`signTime=${(new Date(signTime * 1000)).toUTCString()}`);
+		debug(`signSize=${signSize}`);
+		debug(`encryptedSign=${encryptedSign.toString('hex')}`);
+		debug(`encryptedBodySize=${encryptedBody.length}`);
 
-	if (signSize != 128) {
-		debug(`Invalid signature size: ${signSize}`);
-		return undefined;
+		if (signSize != 128) {
+			debug(`Invalid signature size: ${signSize}`);
+			return undefined;
+		}
+
+		aes.iv.writeUInt32BE(signTime, 0);
+
+		debug(`AES-128 KEY: ${aes.key.toString('hex')}`);
+		debug(`AES-128 IV: ${aes.iv.toString('hex')}`);
+
+		try {
+			const decipher = crypto.createDecipheriv('aes-128-cbc', aes.key, aes.iv);
+			const decrypted = Buffer.concat([decipher.update(encryptedBody), decipher.final()]);
+			debug(`decryptedSize=${decrypted.length}`);
+			return [decrypted];
+		} catch (e) {
+			debug(`AES-128 decryption failed: ${e}`);
+		}
+	} else {
+		const payload = buffer.subarray(payloadOffset, payloadOffset + payloadSize);
+		debug(`payloadSize=${payload.length}`);
+		return [payload];
 	}
 
-	aes.iv.writeUInt32BE(signTime, 0);
-
-	debug(`AES-128 KEY: ${aes.key.toString('hex')}`);
-	debug(`AES-128 IV: ${aes.iv.toString('hex')}`);
-
-	try {
-		const decipher = crypto.createDecipheriv('aes-128-cbc', aes.key, aes.iv);
-		const decrypted = Buffer.concat([decipher.update(encryptedBody), decipher.final()]);
-		debug(`decryptedSize=${decrypted.length}`);
-		return [decrypted];
-	} catch (e) {
-		debug(`AES-128 decryption failed: ${e}`);
-	}
 	return undefined;
 }
 
