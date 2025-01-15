@@ -1,5 +1,6 @@
 import { sprintf } from "sprintf-js";
 import createDebug from 'debug';
+import { inspect } from "node:util";
 const debug = createDebug('fw');
 
 const SAG_JK_WH = Buffer.from('SAG_JK_WH');
@@ -18,9 +19,33 @@ const XBI_FORMATS = [
 	},
 ];
 
-type XbiFieldsParser = Record<number, [string, "str" | "str2" | "buffer" | "type" | "svn" | "uint32be" | "uint16be" | "uint16le" | "uint8" | "swCode" | "region"]>;
+type XbiFieldsParser = Record<number, [string,
+	"str" | "str2" | "buffer" | "type" | "svn" | "uint32be" | "uint16be" | "uint16le" | "uint8" | "splitInfo" | "region" | "compressionInfo" | "ramSize" | "version"
+]>;
+
+export const XBI_CPU_NAMES: Record<number, string> = {
+	0:		"HighGold Vxx ... V3.6",
+	1:		"HighGold V4 C7-Technology",
+	2:		"HighGold V4 C9-Technolog",
+	3:		"EGOLD V1 ... 1.2",
+	4:		"EGOLD V2",
+	5:		"EGOLD Plus V1.2", // U35
+	6:		"EGOLD Plus V3", // from S45 till 55 generation
+	7:		"SGold-Lite", // 65 generation
+	8:		"SGold",
+	0x80:	"TI Hercules-Chipset"
+};
+
+export const XBI_DATA_FORMAT = {
+	0:		"bin",
+	1:		"len-chk",
+	2:		"raw",
+	3:		"compressed"
+};
 
 const XBI_FILEDS: XbiFieldsParser = {
+	0x11:	['minWinswupVersion', 'version'],
+
 	0x12:	['reconfigureTime', 'str'],
 	0x13:	['linkTime', 'str'],
 	0x16:	['releaseType', 'str'],
@@ -30,14 +55,21 @@ const XBI_FILEDS: XbiFieldsParser = {
 	0x1D:	['svn', 'svn'],
 
 	0x23:	['flashSize', 'uint32be'],
+	0x24:	['ertecSum', 'uint16be'],
+	0x25:	['statisticAddr', 'uint32be'],
 	0x28:	['model', 'str'],
 	0x29:	['vendor', 'str'],
 	0x2A:	['baseline', 'str'],
 	0x30:	['eraseRegions[]', 'region'],
-	0x37:	['swCode', 'swCode'],
-	0x34:	['projectType', 'uint8'],
+	0x31:	['asicType', 'uint8'],
+	0x32:	['flashWriteType', 'uint8'],
+	0x33:	['ramSize', 'ramSize'],
+	0x37:	['splitInfo', 'splitInfo'],
+	0x34:	['cpuType', 'uint8'],
+	0x35:	['ignitionType', 'uint8'],
+	0x38:	['align', 'uint16be'],
 	0x39:	['compressionType', 'uint8'],
-	0x3A:	['compressionInfo', 'buffer'],
+	0x3A:	['compressionInfo', 'compressionInfo'],
 	0x40:	['updateType', 'type'],
 
 	0x50:	['mapInfoSize', 'uint16be'],
@@ -50,7 +82,7 @@ const XBI_FILEDS: XbiFieldsParser = {
 	0x62:	['baselineVersion', 'str'],
 	0x63:	['baselineRelease', 'str'],
 
-	0x64:	['mobileName', 'str2'],
+	0x64:	['operatorProductName', 'str2'],
 	0x70:	['dll', 'str2'],
 };
 
@@ -59,14 +91,22 @@ const XBI_FILEDS2: XbiFieldsParser = {
 };
 
 const XBI_TYPES: Record<number, string> = {
-	0:	'MobSw',
-	1:	'Eesimu',
+	0:	'MobSw',			// Mobile-SW
+	1:	'Eesimu',			// Data for EEPROM-Simulation in Flash (old!)
 	2:	'VoiceMemo',
 	3:	'CodeOnly',
 	4:	'LangOnly',
 	5:	'CodeAndLang',
-	6:	'DiffFile',
-	7:	'ExtendedNewSplit',
+	6:	'DiffFile',			// Incremental Mobile-SW (only for development)
+	7:	'ExtendedNewSplit',	// Extended Split-SW
+};
+
+type XbiCompressionInfo = {
+	algorithm:	number;
+	compressionRatio: number;
+	additionalInfo: number[];
+	fromFormat: number;
+	toFormat: number;
 };
 
 export type XbiFrame = {
@@ -96,9 +136,9 @@ export type XbiFormat = {
 	version: number;
 };
 
-export type XbiInfoSwCode = {
+export type XbiSplitInfo = {
 	addr: number;
-	value: number;
+	id: number;
 };
 
 export type XbiInfoMemoryRegion = {
@@ -123,8 +163,9 @@ export type XbiInfo = {
 	model?: string;
 	vendor?: string;
 	baseline?: string;
-	swCode?: XbiInfoSwCode;
-	projectType?: number;
+	splitInfo?: XbiSplitInfo;
+	cpuType?: number;
+	cpuTypeName?: string;
 	updateType?: string;
 	mapInfoSize?: number;
 	mapInfo?: Buffer[];
@@ -133,10 +174,19 @@ export type XbiInfo = {
 	databaseName?: string;
 	baselineVersion?: string;
 	baselineRelease?: string;
-	mobileName?: string;
+	operatorProductName?: string;
 	dll?: string;
 	eraseRegions?: XbiInfoMemoryRegion[];
 	dataFlash?: XbiInfoMemoryRegion[];
+	hwid?: number;
+	align?: number;
+	ertecSum?: number;
+	statisticAddr?: number;
+	minWinswupVersion?: number;
+	asicType?: number;
+	flashWriteType?: number;
+	ramSize?: number;
+	ignitionType?: number;
 };
 
 export function isXbi(buffer: Buffer) {
@@ -167,6 +217,26 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 		compressionType: 0,
 	};
 
+	const postprocessor = (key: string, frame: XbiFrame) => {
+		switch (key) {
+			case "cpuType":
+				if (info.cpuType != null && XBI_CPU_NAMES[info.cpuType]) {
+					info.cpuTypeName = XBI_CPU_NAMES[info.cpuType];
+					debug(sprintf("[info] %02X: cpuTypeName = %s", frame.cmd, info.cpuTypeName));
+				}
+			break;
+
+			case "mapInfo[]":
+				if (info.mapInfo != null) {
+					info.hwid = info.mapInfo[0].readUInt16LE(2);
+					debug(sprintf("[info] %02X: HWID = %d", frame.cmd, info.hwid));
+				}
+			break;
+		}
+	};
+
+	const printValue = (value: any) => inspect(value, { breakLength: Infinity });
+
 	let offset = xbiFormat.offset;
 	while (offset < buffer.length) {
 		const [size, frame] = decodeXbiFrame(0xFE, xbiFormat.version, buffer.subarray(offset));
@@ -187,11 +257,13 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 			infoRef[shortKey] = infoRef[shortKey] || [];
 			const decodedValue = decodeXbiInfoField(type, xbiFormat.key, frame.value);
 			infoRef[shortKey].push(decodedValue);
-			debug(sprintf("[info] %02X: %s =", frame.cmd, key), decodedValue);
+			debug(sprintf("[info] %02X: %s =", frame.cmd, key), printValue(decodedValue));
 		} else {
 			infoRef[key] = decodeXbiInfoField(type, xbiFormat.key, frame.value);
-			debug(sprintf("[info] %02X: %s =", frame.cmd, key), infoRef[key]);
+			debug(sprintf("[info] %02X: %s =", frame.cmd, key), printValue(infoRef[key]));
 		}
+
+		postprocessor(key, frame);
 	}
 
 	if (info.hashAreaSize) {
@@ -214,15 +286,17 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 		const infoRef = info as Record<string, any>;
 		const [key, type] = XBI_FILEDS2[frame.cmd];
 		if (key.endsWith('[]')) {
-			const shortKey = key.substr(0, key.length - 2);
+			const shortKey = key.substring(0, key.length - 2);
 			infoRef[shortKey] = infoRef[shortKey] || [];
 			const decodedValue = decodeXbiInfoField(type, xbiFormat.key, frame.value);
 			infoRef[shortKey].push(decodedValue);
-			debug(sprintf("[info] %02X: %s =", frame.cmd, key), decodedValue);
+			debug(sprintf("[info] %02X: %s =", frame.cmd, key), printValue(decodedValue));
 		} else {
 			infoRef[key] = decodeXbiInfoField(type, xbiFormat.key, frame.value);
-			debug(sprintf("[info] %02X: %s =", frame.cmd, key), infoRef[key]);
+			debug(sprintf("[info] %02X: %s =", frame.cmd, key), printValue(infoRef[key]));
 		}
+
+		postprocessor(key, frame);
 	}
 
 	try {
@@ -243,6 +317,8 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 export function getXbiExtension(xbi: XbiInfo) {
 	if (xbi.updateType == 'ExtendedNewSplit') {
 		return 'xfs';
+	} else if (xbi.updateType == 'CodeOnly') {
+		return 'xci';
 	} else if (xbi.databaseName == 'klf_bootcore') {
 		return 'xbb';
 	}
@@ -356,7 +432,7 @@ function calcChecksum(buffer: Buffer, size: number) {
 	return chk;
 }
 
-function decodeXbiInfoField(type: string, key: Buffer, value: Buffer): string | number | XbiInfoMemoryRegion | XbiInfoSwCode | Buffer {
+function decodeXbiInfoField(type: string, key: Buffer, value: Buffer): any {
 	switch (type) {
 		case "str":
 			return decryptString(key, value).toString();
@@ -378,11 +454,28 @@ function decodeXbiInfoField(type: string, key: Buffer, value: Buffer): string | 
 			return XBI_TYPES[value.readUint8(0)] || `unknown_${value.readUint8(0)}`;
 		case "region":
 			return { from: value.readUint32BE(0), to: value.readUint32BE(4) } as XbiInfoMemoryRegion;
-		case "swCode":
-			return { addr: value.readUint32BE(0), value: value.readUint32BE(4) } as XbiInfoSwCode;
+		case "splitInfo":
+			return { addr: value.readUint32BE(0), id: value.readUint32BE(4) } as XbiSplitInfo;
 		case "buffer":
 			return value;
+		case "ramSize":
+			return value.readUint16BE(0) * 1024;
+		case "compressionInfo":
+			return {
+				algorithm:			value.readUint16BE(0),
+				compressionRatio:	value.readUint16BE(2),
+				fromFormat:			value.readUint8(4),
+				toFormat:			value.readUint8(5),
+				additionalInfo:		[
+					value.readUint16BE(6),
+					value.readUint16BE(8),
+					value.readUint16BE(10),
+				]
+			} as XbiCompressionInfo;
+		case "version":
+			return value[1] + value[0] * 100;
 	}
+
 	throw new Error(`Unknown type: ${type}`);
 }
 
