@@ -26,7 +26,7 @@ type XbiFieldsParser = Record<number, [string,
 export const XBI_CPU_NAMES: Record<number, string> = {
 	0:		"HighGold Vxx ... V3.6",
 	1:		"HighGold V4 C7-Technology",
-	2:		"HighGold V4 C9-Technolog",
+	2:		"HighGold V4 C9-Technology",
 	3:		"EGOLD V1 ... 1.2",
 	4:		"EGOLD V2",
 	5:		"EGOLD Plus V1.2", // U35

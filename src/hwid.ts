@@ -165,6 +165,7 @@ export enum HWID {
 	X75_HYDRA_NEW				= 411,
 	X75_PHILIPPE				= 412,
 	X75_OBSIDIAN				= 413,
+	X75_WHITESTONE				= 415,
 
 	// ???
 	CHARLIE						= 1024,
@@ -184,4 +185,4 @@ export enum HWID {
 
 	// APOXI
 	X95_DIAMOND					= 8000,
-};
+}

@@ -1,7 +1,7 @@
 import iconv from 'iconv-lite';
 
 export function getVersionFromFFS(buffer: Buffer) {
-	return _getVersionFromFFS_SG(buffer) || _getVersionFromFFS_NSG(buffer);
+	return _getVersionFromFFS_SG(buffer) ?? _getVersionFromFFS_NSG(buffer);
 }
 
 function _getVersionFromFFS_NSG(buffer: Buffer) {
@@ -15,7 +15,7 @@ function _getVersionFromFFS_NSG(buffer: Buffer) {
 		index += fileNamePtr.length;
 
 		const possibleString = buffer.subarray(index, index + 256).filter((byte) => byte != 0xFF).toString();
-		const matches = possibleString.match(/([\w\d]+_\d+_[\w\d-]+_\d+_\d+)\n/i);
+		const matches = possibleString.match(/(\w+_\d+_[\w-]+_\d+_\d+)\n/i);
 
 		if (matches && matches[1])
 			return matches[1];
@@ -23,7 +23,7 @@ function _getVersionFromFFS_NSG(buffer: Buffer) {
 		lastIndex = index + 1;
 	}
 
-	return null;
+	return undefined;
 }
 
 function _getVersionFromFFS_SG(buffer: Buffer) {
@@ -53,12 +53,12 @@ function _getVersionFromFFS_SG(buffer: Buffer) {
 			}
 
 			const possibleString = Buffer.from(chars).toString();
-			if (possibleString.match(/^[\w\d]+_\d+_[\w\d-]+_\d+_\d+$/i))
+			if (possibleString.match(/^\w+_\d+_[\w-]+_\d+_\d+$/i))
 				return possibleString;
 
 			lastIndex = index + 1;
 		}
 	}
 
-	return null;
+	return undefined;
 }

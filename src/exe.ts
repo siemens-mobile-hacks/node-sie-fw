@@ -92,18 +92,18 @@ function extractFromServiceExe(buffer: Buffer, version: number, extractExe: bool
 		size = buffer.readUInt32BE(offset) + SAG_JK_WH.length + 4;
 		blocks[0] = { offset: buffer.length - size, size };
 	} else {
-		const verions: Record<number, { metaOffset: number }> = {
+		const versions: Record<number, { metaOffset: number }> = {
 			1: { metaOffset: 108 },
 			2: { metaOffset: 114 },
 		};
 
-		if (!(version in verions)) {
+		if (!(version in versions)) {
 			debug(`Unknown xbi version: ${version}`);
 			return undefined;
 		}
 
 		// Block 0
-		offset = buffer.length - verions[version].metaOffset;
+		offset = buffer.length - versions[version].metaOffset;
 		size = readBits(buffer.subarray(offset));
 		blocks[0] = { size, offset: offset - size };
 
@@ -158,7 +158,7 @@ function extractFromServiceExe(buffer: Buffer, version: number, extractExe: bool
 function readBits(ptr: Buffer): number {
     let result = 0n;
 	for (let i = 0n; i < 32n; i++)
-		result += ((ptr[Number(i)] & 0x80) ? 1n : 0n) << i;
+		result += ((ptr[Number(i)] & 0x80) != 0 ? 1n : 0n) << i;
     return Number(result);
 }
 
