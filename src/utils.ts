@@ -1,4 +1,11 @@
-export function decodeASCIIString(buf: Buffer): string | undefined {
+export function decodeASCIIString(source: Buffer, offset?: number, size?: number): string | undefined {
+	let buf: Buffer = source;
+	if (offset != null && size != null) {
+		buf = source.subarray(offset, offset + size);
+	} else if (offset != null) {
+		buf = source.subarray(offset);
+	}
+
 	let end = 0;
 	for (; end < buf.length; end++) {
 		const byte = buf[end];
@@ -8,16 +15,17 @@ export function decodeASCIIString(buf: Buffer): string | undefined {
 			return undefined; // Not valid ASCII
 	}
 
-	// Ensure the remaining bytes are all zero
-	for (let i = end; i < buf.length; i++) {
-		if (buf[i] !== 0x00)
-			return undefined;
-	}
-
 	return buf.toString('utf-8', 0, end);
 }
 
-export function decodeCString(buf: Buffer): string {
+export function decodeCString(source: Buffer, offset?: number, size?: number): string {
+	let buf: Buffer = source;
+	if (offset != null && size != null) {
+		buf = source.subarray(offset, offset + size);
+	} else if (offset != null) {
+		buf = source.subarray(offset);
+	}
+
 	let end = 0;
 	for (; end < buf.length; end++) {
 		const byte = buf[end];
@@ -25,4 +33,14 @@ export function decodeCString(buf: Buffer): string {
 			break;
 	}
 	return buf.toString('utf-8', 0, end);
+}
+
+export function formatSize(bytes: number): string {
+	const units = ["B", "KiB", "MiB", "GiB"];
+	let i = 0;
+	while (bytes >= 1024 && i < units.length - 1) {
+		bytes /= 1024;
+		i++;
+	}
+	return `${Math.round(bytes * 100) / 100} ${units[i]}`;
 }
