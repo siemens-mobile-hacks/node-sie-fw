@@ -1,6 +1,7 @@
 import { sprintf } from "sprintf-js";
 import createDebug from 'debug';
 import { inspect } from "node:util";
+import { lzssDecompressor } from "./lzss.js";
 const debug = createDebug('fw');
 
 const SAG_JK_WH = Buffer.from('SAG_JK_WH');
@@ -116,16 +117,16 @@ export type XbiFrame = {
 	chk: number;
 };
 
-export type XbiWriteFrame = {
+export type XbiDataChunk = {
 	addr: number;
 	size: number;
 	offset: number;
 };
 
-export type XbiInfoWrite = {
-	offset: number;
+export type XbiWriteBlock = {
 	addr: number;
 	size: number;
+	data: Buffer;
 };
 
 export type XbiFormat = {
@@ -149,7 +150,7 @@ export type XbiInfoMemoryRegion = {
 export type XbiInfo = {
 	signed: boolean;
 	valid: boolean;
-	writes: XbiInfoWrite[];
+	dataChunks: XbiDataChunk[];
 	size: number;
 	compressionType: number;
 	compressionInfo?: Buffer;
@@ -209,10 +210,11 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 		}
 	}
 
+	const dataChunks: XbiDataChunk[] = [];
 	const info: XbiInfo = {
 		signed: xbiFormat.signed,
 		valid: true,
-		writes: [],
+		dataChunks,
 		size: buffer.length,
 		compressionType: 0,
 	};
@@ -303,7 +305,7 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 		while (offset < buffer.length) {
 			const [size, frame] = decodeXbiWriteFrame(xbiFormat.version, buffer.subarray(offset), offset);
 			offset += size;
-			info.writes.push(frame);
+			info.dataChunks.push(frame);
 		}
 	} catch (e) {
 		if (!onlyHeader)
@@ -342,24 +344,41 @@ export function convertXbiToFlash(buffer: Buffer, parsedXbi: XbiInfo | undefined
 		buffer.copy(flash, localOffset);
 	};
 
-	if (xbi.compressionType == 3) {
-		const decompressor = xbiDecompressor(writeFlash);
-		let finished = false;
-		for (const w of xbi.writes)
-			finished = decompressor(buffer.subarray(w.offset, w.offset + w.size));
-		if (!finished)
-			throw new Error(`Unexpected EOF.`);
-	} else if (xbi.compressionType == 0) {
-		for (const w of xbi.writes)
-			writeFlash(w.addr, buffer.subarray(w.offset, w.offset + w.size));
-	} else {
-		throw new Error(`Unknown compression type: ${xbi.compressionType}`);
-	}
+	processXbiWriteBlocks(buffer, xbi, writeFlash);
 
 	return flash;
 }
 
-function decodeXbiWriteFrame(version: number, buffer: Buffer, offset: number): [number, XbiWriteFrame] {
+export function getXbiWriteBlocks(buffer: Buffer, parsedXbi: XbiInfo | undefined = undefined): XbiWriteBlock[] {
+	const xbi = parsedXbi ?? parseXbi(buffer);
+	if (!xbi)
+		throw new Error(`XBI is not parsed!`);
+
+	const writes: XbiWriteBlock[] = [];
+	processXbiWriteBlocks(buffer, xbi, (addr, data) => {
+		const dataCopy = Buffer.from(data);
+		writes.push({ addr, size: dataCopy.length, data: dataCopy });
+	});
+	return writes;
+}
+
+function processXbiWriteBlocks(buffer: Buffer, xbi: XbiInfo, onWrite: (addr: number, data: Buffer) => void) {
+	if (xbi.compressionType == 3) {
+		const decompressor = xbiDecompressor(onWrite);
+		let finished = false;
+		for (const chunk of xbi.dataChunks)
+			finished = decompressor(buffer.subarray(chunk.offset, chunk.offset + chunk.size));
+		if (!finished)
+			throw new Error(`Unexpected EOF.`);
+	} else if (xbi.compressionType == 0) {
+		for (const chunk of xbi.dataChunks)
+			onWrite(chunk.addr, buffer.subarray(chunk.offset, chunk.offset + chunk.size));
+	} else {
+		throw new Error(`Unknown compression type: ${xbi.compressionType}`);
+	}
+}
+
+function decodeXbiWriteFrame(version: number, buffer: Buffer, offset: number): [number, XbiDataChunk] {
 	if (version == 24) {
 		const addr = (buffer.readUInt8(0) << 16) | (buffer.readUInt8(1) << 8) | (buffer.readUInt8(2));
 		const size = buffer.readUInt8(3);
@@ -527,7 +546,7 @@ function xbiDecompressor(onWrite: (addr: number, block: Buffer) => void) {
 	const decompressor = lzssDecompressor();
 
 	return (buffer: Buffer) => {
-		const decompressedData = decompressor(buffer);
+		const { data: decompressedData, finished } = decompressor(buffer);
 
 		for (let i = 0; i < decompressedData.length; i++) {
 			const byte = decompressedData[i];
@@ -603,78 +622,6 @@ function xbiDecompressor(onWrite: (addr: number, block: Buffer) => void) {
 			}
 		}
 
-		return state == 0;
-	};
-}
-
-function lzssDecompressor() {
-	const decompressedBuffer = Buffer.alloc(4096);
-	const circularBuffer = Buffer.alloc(4096);
-	let circularBufferPos = 1;
-	let copyFrom = 0;
-	let state = 0;
-	let tempByte = 0;
-	let tempByteBitsCnt = 0;
-
-	return (buffer: Buffer) => {
-		let decompressedSize = 0;
-
-		for (let i = 0; i < buffer.length; i++) {
-			const byte = buffer[i];
-			for (let bitN = 0; bitN < 8; bitN++) {
-				const bit = (byte & (1 << (8 - bitN - 1))) != 0 ? 1 : 0;
-
-				switch (state) {
-					case 0:
-						tempByteBitsCnt = 0;
-						tempByte = 0;
-						state = bit ? 1 : 2;
-					break;
-
-					case 1:
-						tempByte = (tempByte << 1) | bit;
-						tempByteBitsCnt++;
-
-						if (tempByteBitsCnt == 8) {
-							decompressedBuffer[decompressedSize++] = tempByte;
-							circularBuffer[circularBufferPos] = tempByte;
-							circularBufferPos = (circularBufferPos + 1) & 0xFFF;
-							state = 0;
-						}
-					break;
-
-					case 2:
-						tempByte = (tempByte << 1) | bit;
-						tempByteBitsCnt++;
-
-						if (tempByteBitsCnt == 12) {
-							copyFrom = tempByte;
-							tempByte = 0;
-							tempByteBitsCnt = 0;
-							state = 3;
-						}
-					break;
-
-					case 3:
-						tempByte = (tempByte << 1) | bit;
-						tempByteBitsCnt++;
-
-						if (tempByteBitsCnt == 4) {
-							for (let j = 0; j <= tempByte + 1; j++) {
-								const value = circularBuffer[(copyFrom + j) & 0xFFF];
-								decompressedBuffer[decompressedSize++] = value;
-								circularBuffer[circularBufferPos] = value;
-								circularBufferPos = (circularBufferPos + 1) & 0xFFF;
-							}
-							state = 0;
-						}
-					break;
-
-					default:
-						throw new Error(`Invalid state.`);
-				}
-			}
-		}
-		return decompressedBuffer.subarray(0, decompressedSize);
+		return finished && state == 0;
 	};
 }

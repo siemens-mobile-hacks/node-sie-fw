@@ -10,7 +10,7 @@
 	"scripts": {
 		"build": "tsc",
 		"watch": "tsc --watch",
-		"test": "echo \"Error: no test specified\" && exit 1",
+		"test": "vitest run",
 		"pub": "tsc && npm publish --access public"
 	},
 	"author": "",
@@ -31,10 +31,11 @@
 		"@types/debug": "^4.1.12",
 		"@types/luxon": "^3.6.2",
 		"@types/moo": "^0.5.10",
-		"@types/node": "^22.10.5",
+		"@types/node": "^22.20.1",
 		"@types/sprintf-js": "^1.1.4",
 		"table": "^6.9.0",
-		"typescript": "^5.7.3"
+		"typescript": "^5.7.3",
+		"vitest": "^5.0.0"
 	},
 	"packageManager": "pnpm@10.0.0+sha512.b8fef5494bd3fe4cbd4edabd0745df2ee5be3e4b0b8b08fa643aa3e4c6702ccc0f00d68fa8a8c9858a735a0032485a44990ed2810526c875e416f001b17df12b"
 }
