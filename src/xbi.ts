@@ -150,6 +150,7 @@ export type XbiInfoMemoryRegion = {
 export type XbiInfo = {
 	signed: boolean;
 	valid: boolean;
+	unknown: Record<number, Buffer>;
 	dataChunks: XbiDataChunk[];
 	size: number;
 	compressionType: number;
@@ -171,6 +172,7 @@ export type XbiInfo = {
 	mapInfoSize?: number;
 	mapInfo?: Buffer[];
 	hashAreaSize?: number;
+	hashArea?: Buffer;
 	t9?: number;
 	databaseName?: string;
 	baselineVersion?: string;
@@ -214,6 +216,7 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 	const info: XbiInfo = {
 		signed: xbiFormat.signed,
 		valid: true,
+		unknown: {},
 		dataChunks,
 		size: buffer.length,
 		compressionType: 0,
@@ -248,6 +251,7 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 			break;
 
 		if (!XBI_FILEDS[frame.cmd]) {
+			info.unknown[frame.cmd] = frame.value;
 			debug(sprintf("[info] %02X: unknown", frame.cmd), frame.value);
 			continue;
 		}
@@ -269,7 +273,8 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 	}
 
 	if (info.hashAreaSize) {
-		debug("skip HASH_AREA: +" + info.hashAreaSize);
+		info.hashArea = buffer.subarray(offset, offset + info.hashAreaSize);
+		debug("HASH_AREA: +" + info.hashAreaSize);
 		offset += info.hashAreaSize;
 	}
 
@@ -281,6 +286,7 @@ export function parseXbi(buffer: Buffer, onlyHeader: boolean = false): XbiInfo |
 		offset += size;
 
 		if (!XBI_FILEDS2[frame.cmd]) {
+			info.unknown[frame.cmd] = frame.value;
 			debug(sprintf("[info] %02X: unknown", frame.cmd), frame.value);
 			continue;
 		}
